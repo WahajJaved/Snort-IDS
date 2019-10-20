@@ -1,0 +1,134 @@
+Install GNS3
+
+sudo add-apt-repository ppa:gns3/ppa
+sudo apt-get update
+sudo apt-get install gns3-gui
+
+
+If_you_want_IOU_support
+
+sudo dpkg --add-architecture i386
+sudo apt-get update
+sudo apt-get install gns3-iou
+
+
+
+
+If_you_want_Docker_support
+
+
+
+Remove any old versions:
+sudo apt-get remove docker docker-engine docker.io
+
+Install these packages, if not already present:
+sudo apt-get install \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    software-properties-common
+
+Import the official Docker GPG key:
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+Setup the Docker repo:
+sudo add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+
+
+
+*NOTE* There currently isn’t a package for Ubuntu 18.04 in the stable release channel, but there is in the edge channel.
+
+Update the metadata:
+sudo apt-get update
+
+Install Docker:
+sudo apt-get install docker-ce
+
+Finally, add your user to the docker group, and restart your user session
+sudo usermod -a -G docker username
+
+
+NOTE_1 If you encounter any permission errors when trying to run GNS3, DynaMIPS devices, Wireshark, or Qemu VMs, ensure your user belongs to the following groups:
+sudo usermod -a -G ubridge libvirt kvm wireshark USERNAME
+
+You can see which groups your user belongs to, by simply typing “groups” in a command terminal. If your user account is missing from one or more of these groups, user the usermod command listed above to add them. Be sure to log out and back in to restart your user session
+
+
+
+
+VirtualBox
+wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
+sudo add-apt-repository "deb [arch=amd64] http://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib"
+sudo apt update && sudo apt install virtualbox-6.0
+
+
+## GNS3 VM
+https://github.com/GNS3/gns3-gui/releases/download/v2.1.16/GNS3.VM.VirtualBox.2.1.16.zip
+
+
+
+
+To create a network connection between the GNS3 VM and the host OS a host-only network must be configured. In VirtualBox > Preferences > Network, set up a host-only network. In most cases, it will be called vboxnet0 or similar. 
+
+->insert screen_NetworkSettingGNS3VM
+
+->insert screen_HostNetwork
+
+->insert screen_EnableHostNetwrokVM
+## Replace IP_address and subnet_mask with details from screenshot, 
+sudo ip addr add IP_address/subnet_mask dev eth0
+sudo ip link set dev eth0 up
+
+
+When the connection between GNS3 and VirtualBox have been made you need to tell GNS3 which VMs it should see and be able to use.
+
+In GNS3, click on Preferences > VirtualBox. Check that the path to vboxwrapper.py (should be /usr/share/gns3/vboxwrapper.py and is set per default) is correct (if you get an OK when pressing the "Test Settings"-button, it works, otherwise see the installation step).
+Go to the VirtualBox Guest tab to add the VirtualBox VMs in GNS3. Choose an identifier name, a VM from the VM list (you may have to refresh the list using the provided button). To avoud confusion and possible errors, it is recomended to use the same identifier name as the name of the VM. 
+
+
+IP Address is shown in screen_HostNetwork
+->insert screen_ServerHostBinding
+
+
+
+sudo apt-get install libpcap-dev git
+git clone https://github.com/GNS3/ubridge
+
+CD In the ubridge directory:
+make
+sudo make install
+
+
+
+Now open the gns3 gui app:
+
+After this play the video createProject
+
+After initializing the project, now open the virtualbox virtual machine running the GNS3VM 
+
+Run the following: 
+su
+apt-get install uml-utilities
+
+
+Once the package is installed run the following commands as root to create a loopback interface and assign an IP address to it.
+
+tunctl -t tap0
+ifconfig tap0 10.200.200.1 netmask 255.255.255.252 up
+
+
+Enter the following commands to create IPTables firewall rules to perform NAT and forward the packets from the interface specified after “-i” through the interface specified after “-o”.
+
+iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+iptables -A FORWARD -i tap0 -j ACCEPT
+
+
+crontab -e
+@reboot /usr/sbin/tunctl -t tap0 && /sbin/ifconfig tap0 10.200.200.1 netmask 255.255.255.252 up
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+The cloud is now ready, add a router to the topology and connect it to the cloud, power on the router and configure its interface with an IP address in the same range as the IP assigned to the tap0 interface.
+

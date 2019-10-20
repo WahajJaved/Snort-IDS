@@ -1,0 +1,464 @@
+
+// Setting up the openwrt router 
+
+Replace the "/etc/config/network" file in Openwrt Router with the following:
+'
+config interface 'loopback'           
+        option ifname 'lo'            
+        option proto 'static'         
+        option ipaddr '127.0.0.1'  
+        option netmask '255.0.0.0'  
+
+config interface 'lan'                
+        option ifname 'eth0'          
+        option netmask '255.255.255.0'
+        option ipaddr '192.168.1.1'   
+        option dns '8.8.8.8'          
+        option proto 'static'           
+                                        
+config interface 'wan'  
+        option ifname 'eth1'            
+        option proto 'static'           
+        option ipaddr '10.10.10.2'           
+        option netmask '255.255.255.252'       
+        option gateway '10.10.10.1'          
+        option dns '8.8.8.8'  
+        
+config globals 'globals'                
+        option ula_prefix 'fd01:5055:bb4f::/48'
+                                               
+config route 'default_route'                   
+        option interface 'wan'          
+        option target '10.10.10.1'           
+        option gateway '0.0.0.0'               
+'
+
+And then run the following command to restart the network service and implement the changes
+
+/etc/init.d/network restart
+
+
+Now the router is configured to have internet access.
+Run the following command to confirm 
+
+ping google.com
+
+
+
+
+
+
+// Set up Ubuntu Docker VM ( which we will later setup as IDS)
+
+# Configure the ip mapping from the router
+ifconfig eth0 192.168.1.5 netmask 255.255.255.0 up
+# Add default gateway
+route add default gw 192.168.1.1
+# Add default nameserver
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
+
+
+
+
+
+
+
+
+// Downloading, Installing and Setting up Snort7
+
+#Install the required libraries required for setting up Snort
+sudo apt install -y gcc libpcre3-dev zlib1g-dev libluajit-5.1-dev libpcap-dev openssl libssl-dev libnghttp2-dev libdumbnet-dev bison flex libdnet nano
+
+# Download the snort and the daq library tarballs
+wget https://www.snort.org/downloads/snort/daq-2.0.6.tar.gz
+wget https://www.snort.org/downloads/snort/snort-2.9.13.tar.gz
+
+#Extract the daq tarball and install the library 
+tar xvzf daq-2.0.6.tar.gz
+cd daq-2.0.6
+./configure && make && make install
+
+
+#Extract the snort tarball and install the software 
+tar xvzf snort-2.9.13.tar.gz
+cd snort-2.9.13
+./configure --enable-sourcefire && make && make install
+
+
+
+Next, you will need to configure Snort for your system. This includes editing some configuration files, downloading the rules that Snort will follow, and taking Snort for a test run.
+
+#Start with updating the shared libraries using the command underneath.
+
+ldconfig
+
+
+#Snort on Ubuntu gets installed to /usr/local/bin/snort directory, it is #good practice to create a symbolic link to /usr/sbin/snort.
+
+ln -s /usr/local/bin/snort /usr/sbin/snort
+
+
+
+
+
+
+#To run Snort on Ubuntu safely without root access, you should create a #new unprivileged user and a new user group for the daemon to run under.
+
+groupadd snort
+useradd snort -r -s /sbin/nologin -c SNORT_IDS -g snort
+
+
+
+
+#Then create the folder structure to house the Snort configuration, just #copy over the commands below.
+
+ mkdir -p /etc/snort/rules
+ mkdir /var/log/snort
+ mkdir /usr/local/lib/snort_dynamicrules
+
+#Set the permissions for the new directories accordingly.
+
+sudo chmod -R 5775 /etc/snort
+sudo chmod -R 5775 /var/log/snort
+sudo chmod -R 5775 /usr/local/lib/snort_dynamicrules
+sudo chown -R snort:snort /etc/snort
+sudo chown -R snort:snort /var/log/snort
+sudo chown -R snort:snort /usr/local/lib/snort_dynamicrules
+
+
+
+#Create new files for the white and blacklists as well as the local rules.
+
+sudo touch /etc/snort/rules/white_list.rules
+sudo touch /etc/snort/rules/black_list.rules
+sudo touch /etc/snort/rules/local.rules
+
+#Then copy the configuration files from the download folder.
+
+sudo cp ~/snort_src/snort-2.9.12/etc/*.conf* /etc/snort
+sudo cp ~/snort_src/snort-2.9.12/etc/*.map /etc/snort
+
+
+
+
+#Next up, you will need to download the detection rules Snort will follow #to identify potential threats. Snort provides three tiers of rule sets, #community, registered and subscriber rules.
+
+
+
+#Using community rules
+
+#If you just want to quickly test out Snort, grab the community rules using wget with the command below.
+
+wget https://www.snort.org/rules/community -O ~/community.tar.gz
+
+#Extract the rules and copy them to your configuration folder.
+sudo tar -xvf ~/community.tar.gz -C ~/
+sudo cp ~/community-rules/* /etc/snort/rules
+
+# Comment the default libraries rule path as they are not present and need to be downloaded, but all are enabled by default
+sudo sed -i 's/include \$RULE\_PATH/#include \$RULE\_PATH/' /etc/snort/snort.conf > /etc/snort/snort.conf
+
+
+
+
+
+
+#Configuring the network and rule sets
+
+#With the configuration and rule files in place, edit the snort.conf to modify a few parameters. Open the configuration file in your favourite text editor, for example using nano with the command below.
+
+sudo nano /etc/snort/snort.conf
+
+#Find these sections shown below in the configuration file and change the parameters to reflect the examples here.
+
+# Setup the network addresses you are protecting
+ipvar HOME_NET server_public_ip/32
+
+# Set up the external network addresses. Leave as "any" in most situations
+ipvar EXTERNAL_NET !$HOME_NET
+
+# Path to your rules files (this can be a relative path)
+var RULE_PATH /etc/snort/rules
+var SO_RULE_PATH /etc/snort/so_rules
+var PREPROC_RULE_PATH /etc/snort/preproc_rules
+
+# Set the absolute path appropriately
+var WHITE_LIST_PATH /etc/snort/rules
+var BLACK_LIST_PATH /etc/snort/rules
+
+
+In the same snort.conf file, scroll down to the section 6 and set the output for pcap format to be further used by tcpdump to log under filename of snort.log like below.
+
+# unified2
+output unified2: filename snort.log, limit 128
+
+
+
+
+#Lastly, scroll down towards the bottom of the file to find the list of included rule sets. You will need to uncomment the local.rules to allow Snort to load any custom rules.
+
+include $RULE_PATH/local.rules
+
+#If you are using the community rules, add the line underneath to your ruleset as well, for example just below your local.rules line.
+
+include $RULE_PATH/community.rules
+
+
+
+#Your Snort should now be ready to run. Test the configuration using the parameter -T to enable test mode.
+
+sudo snort -T -c /etc/snort/snort.conf
+
+
+
+// Testing the snort configuration
+
+#To test if Snort is logging alerts as intended, add a custom detection rule alert on incoming ICMP connections to the local.rules file. Open your local rules in a text editor.
+
+sudo nano /etc/snort/rules/local.rules
+
+#Then add the following line to the file.
+
+alert icmp any any -> $HOME_NET any (msg:"ICMP test"; sid:10000001; rev:001;)
+
+
+// Snort rule decomposition
+The rule consists of teh following parts:
+
+   . action for traffic matching the rule, alert in this case
+   . traffic protocol like TCP, UDP or ICMP like here
+   . the source address and port, simply marked as any to include all . . . addresses and ports
+    . the destination address and port, $HOME_NET as declared in the . . .configuration and any for port
+    some additional bits
+     *   log message
+      *  unique rule identifier (sid) which for local rules needs to be 1000001 or higher
+       * rule version number.
+
+# Save the local.rules and exit the editor.
+
+
+
+# Start Snort with -A console options to print the alerts to stdout. You will need to select the correct network interface with the public IP address of your server, for example, eth0.
+
+sudo snort -A console -i eth0 -u snort -g snort -c /etc/snort/snort.conf
+
+
+
+
+
+apt-get install iptables
+
+
+sudo ifconfig eth0 10.200.200.2 netmask 255.255.255.252
+sudo ifconfig eth1 10.10.10.1 netmask 255.255.255.252
+
+
+
+Forwarding the packets between the Internet on one adapter and your LAN on the other is the purview of iptables, a tool for configuring the Linux kernel's IP filtering subsystem.
+
+sudo iptables -A FORWARD --in-interface eth1 --out-interface eth0 --source 10.10.10.0/255.255.255.0 -m state --state NEW -j ACCEPT
+
+ allows computers on the LAN interface eth1 to start new connections, and forwards them to the outside world via the eth0 interface
+
+
+ sudo iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT 
+ keeps subsequent packets from those connections flowing smoothly as well.
+ 
+ Next, 
+ sudo iptables -A POSTROUTING -t nat -j MASQUERADE
+ activates Network Address Translation (NAT), secretly rewriting the IP addresses of traffic from the LAN so that when it goes out to the Internet, it appears to originate from the Linux box performing the routing. This is a necessary evil for most home Internet connections, both because it allows you to use the private 192.168.x.x IP address block, and because many ISPs frown upon traffic coming from multiple computers.
+
+Finally, run sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward to activate the kernel's packet forwarding.
+
+This setup will pass traffic from your LAN to your Internet connection, but it does not configure the network settings on the LAN computers themselves. 
+ 
+ 
+// Router
+ 
+ Edit the file /etc/config/dhcp in OpenwrtRouter
+ 
+config dnsmasq 
+        option domainneeded '1'
+        option boguspriv '1'   
+        option filterwin2k '0' 
+        option localise_queries '1'
+        option rebind_protection '1'
+        option rebind_localhost '1' 
+        option local '/lan/'        
+        option domain 'lan'        
+        option expandhosts '1'
+        option nonegcache '0' 
+        option authoritative '1'
+        option readethers '1'   
+        option leasefile '/tmp/dhcp.leases'
+        option resolvfile '/tmp/resolv.conf.auto'
+        option localservice '1'                  
+        option server '192.168.1.1'              
+                                   
+                                   
+config dhcp 'lan'
+        option interface 'lan'
+        option start '2'      
+        option limit '150'    
+        option leasetime '12h'
+        option dhcpv6 'server'
+        option ra 'server'    
+        option dhcp           
+        list dhcp_option '3,192.168.1.1' # Default gateway.
+        list dhcp_option '121,192.168.1.0/24,192.168.1.1' #Static route
+                                                         
+config dhcp 'wan'                                        
+        option interface 'wan'
+        option ignore '1'     
+                              
+config odhcpd 'odhcpd'   
+        option maindhcp '0'
+        option leasefile '/tmp/hosts/odhcpd'
+        option leasetrigger '/usr/sbin/odhcpd-update'
+                                                     
+config host                                          
+        option name 'openwrt.com'
+        option ip '192.168.1.1'  
+                                 
+
+route add -net 0.0.0.0 netmask 0.0.0.0 gw 10.200.200.1
+
+
+        // Logs analyzed using 'tcpdump -qns 0 -X -r logfile
+
+        
+
+
+        
+// Log file captured and analyzed by snort to reveal the SSH incoming SSH
+connections and their IP addresses from which the connections originated
+Snort here is acting as an IDS
+        
+root@IDS:~# snort -r /var/log/snort/snort.log.1558130523                                  
+Running in packet dump mode
+
+        --== Initializing Snort ==--
+Initializing Output Plugins!
+pcap DAQ configured to read-file.
+Acquiring network traffic from "/var/log/snort/snort.log.1558130523".
+
+        --== Initialization Complete ==--
+
+   ,,_     -*> Snort! <*-
+  o"  )~   Version 2.9.13 GRE (Build 15013) 
+   ''''    By Martin Roesch & The Snort Team: http://www.snort.org/contact#team
+           Copyright (C) 2014-2019 Cisco and/or its affiliates. All rights reserved.
+           Copyright (C) 1998-2013 Sourcefire, Inc., et al.
+           Using libpcap version 1.7.4
+           Using PCRE version: 8.38 2015-11-23
+           Using ZLIB version: 1.2.8
+
+Commencing packet processing (pid=7330)
+WARNING: No preprocessors configured for policy 0.
+05/17-22:05:14.325230 10.200.200.2 -> 216.58.207.110
+ICMP TTL:62 TOS:0x0 ID:19833 IpLen:20 DgmLen:84 DF
+Type:8  Code:0  ID:45   Seq:1  ECHO
+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+
+WARNING: No preprocessors configured for policy 0.
+05/17-22:05:14.382421 216.58.207.110 -> 10.200.200.2
+ICMP TTL:59 TOS:0x0 ID:5886 IpLen:20 DgmLen:84 DF
+Type:0  Code:0  ID:45  Seq:1  ECHO REPLY
+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+
+WARNING: No preprocessors configured for policy 0.
+05/17-22:07:25.600308 10.200.200.1:57538 -> 10.200.200.2:22
+TCP TTL:64 TOS:0x0 ID:61343 IpLen:20 DgmLen:60 DF
+******S* Seq: 0xA6982733  Ack: 0x0  Win: 0x7210  TcpLen: 40
+TCP Options (5) => MSS: 1460 SackOK TS: 8177836 0 NOP WS: 7 
+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+
+WARNING: No preprocessors configured for policy 0.
+05/17-22:07:32.981368 10.200.200.1:57540 -> 10.200.200.2:22
+TCP TTL:64 TOS:0x0 ID:8235 IpLen:20 DgmLen:60 DF
+******S* Seq: 0x7951EFCA  Ack: 0x0  Win: 0x7210  TcpLen: 40
+TCP Options (5) => MSS: 1460 SackOK TS: 8179681 0 NOP WS: 7 
+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+
+WARNING: No preprocessors configured for policy 0.
+05/17-22:07:37.078471 10.200.200.1:57542 -> 10.200.200.2:22
+TCP TTL:64 TOS:0x0 ID:17707 IpLen:20 DgmLen:60 DF
+******S* Seq: 0x4E6796C9  Ack: 0x0  Win: 0x7210  TcpLen: 40
+TCP Options (5) => MSS: 1460 SackOK TS: 8180706 0 NOP WS: 7 
+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+
+===============================================================================
+Run time for packet processing was 0.914 seconds
+Snort processed 5 packets.
+Snort ran for 0 days 0 hours 0 minutes 0 seconds
+   Pkts/sec:            5
+===============================================================================
+Memory usage summary:
+  Total non-mmapped bytes (arena):       782336
+  Bytes in mapped regions (hblkhd):      21590016
+  Total allocated space (uordblks):      676992
+  Total free space (fordblks):           105344
+  Topmost releasable block (keepcost):   97664
+===============================================================================
+Packet I/O Totals:
+   Received:            5
+   Analyzed:            5 (100.000%)
+    Dropped:            0 (  0.000%)
+   Filtered:            0 (  0.000%)
+Outstanding:            0 (  0.000%)
+   Injected:            0
+===============================================================================
+Breakdown by protocol (includes rebuilt packets):
+        Eth:            5 (100.000%)
+       VLAN:            0 (  0.000%)
+        IP4:            5 (100.000%)
+       Frag:            0 (  0.000%)
+       ICMP:            2 ( 40.000%)
+        UDP:            0 (  0.000%)
+        TCP:            3 ( 60.000%)
+        IP6:            0 (  0.000%)
+    IP6 Ext:            0 (  0.000%)
+   IP6 Opts:            0 (  0.000%)
+      Frag6:            0 (  0.000%)
+      ICMP6:            0 (  0.000%)
+       UDP6:            0 (  0.000%)
+       TCP6:            0 (  0.000%)
+     Teredo:            0 (  0.000%)
+    ICMP-IP:            0 (  0.000%)
+    IP4/IP4:            0 (  0.000%)
+    IP4/IP6:            0 (  0.000%)
+    IP6/IP4:            0 (  0.000%)
+    IP6/IP6:            0 (  0.000%)
+        GRE:            0 (  0.000%)
+    GRE Eth:            0 (  0.000%)
+   GRE VLAN:            0 (  0.000%)
+    GRE IP4:            0 (  0.000%)
+    GRE IP6:            0 (  0.000%)
+GRE IP6 Ext:            0 (  0.000%)
+   GRE PPTP:            0 (  0.000%)
+    GRE ARP:            0 (  0.000%)
+    GRE IPX:            0 (  0.000%)
+   GRE Loop:            0 (  0.000%)
+       MPLS:            0 (  0.000%)
+        ARP:            0 (  0.000%)
+        IPX:            0 (  0.000%)
+   Eth Loop:            0 (  0.000%)
+   Eth Disc:            0 (  0.000%)
+   IP4 Disc:            0 (  0.000%)
+   IP6 Disc:            0 (  0.000%)
+   TCP Disc:            0 (  0.000%)
+   UDP Disc:            0 (  0.000%)
+  ICMP Disc:            0 (  0.000%)
+All Discard:            0 (  0.000%)
+      Other:            0 (  0.000%)
+Bad Chk Sum:            0 (  0.000%)
+    Bad TTL:            0 (  0.000%)
+     S5 G 1:            0 (  0.000%)
+     S5 G 2:            0 (  0.000%)
+      Total:            5
+===============================================================================
+Snort exiting
+
+        
+        
